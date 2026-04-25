@@ -6,7 +6,7 @@ const toKey = () => new Date().toISOString().split("T")[0];
 const nextDay = () => { const d = new Date(); d.setDate(d.getDate()+1); return d.toISOString().split("T")[0]; };
 const fmtDate = s => { try { const [y,m,d]=s.split("-"); return `${m}/${d}/${y}`; } catch { return s; } };
 
-const ADMIN_EMAIL = "marc@trugoodnessbrands.com";
+const ADMIN_EMAIL = "marc.gaudreault@gmail.com";
 const COLS = ["#F5A623","#2ECC71","#9B59B6","#E74C3C","#3498DB","#E67E22","#1ABC9C","#E91E63"];
 const FONT = "https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap";
 
