@@ -805,6 +805,7 @@ function SalesView({ isAdmin, emps, events }) {
   const [filter,   setFilter]   = useState("all");
   const [selEvent, setSelEvent] = useState("all");
   const [view,     setView]     = useState("byPerson");
+  const [editing,  setEditing]  = useState(null);
 
   useEffect(() => { dbGet("sales").then(d => setSales(d||[])); }, []);
 
@@ -812,6 +813,9 @@ function SalesView({ isAdmin, emps, events }) {
   const del = id => { if(confirm("Delete this entry?")) saveSales(sales.filter(s=>s.id!==id)); };
 
   if (!sales) return <div style={{padding:32,textAlign:"center",color:T.muted}}>Loading...</div>;
+
+  if (showForm) return <SalesForm emps={emps} events={upcomingEvents} onSave={v=>{saveSales([...sales,{...v,id:uid()}]);setShowForm(false);}} onCancel={()=>setShowForm(false)}/>;
+  if (editing)  return <SalesForm emps={emps} events={upcomingEvents} init={editing} onSave={v=>{saveSales(sales.map(s=>s.id===editing.id?{...s,...v}:s));setEditing(null);}} onCancel={()=>setEditing(null)}/>;
 
   const ename  = id => emps.find(e=>e.id===id)?.name || id;
   const ecolor = id => emps.find(e=>e.id===id)?.color || T.muted;
@@ -829,15 +833,6 @@ function SalesView({ isAdmin, emps, events }) {
   const totals = {};
   CATEGORIES.forEach(c => { totals[c.id] = visible.reduce((sum,s) => sum+(parseFloat(s[c.id])||0), 0); });
   const grandTotal = Object.values(totals).reduce((a,b)=>a+b, 0);
-
-  if (showForm) return (
-    <SalesForm
-      emps={emps}
-      events={upcomingEvents}
-      onSave={v => { saveSales([...sales, {...v, id:uid()}]); setShowForm(false); }}
-      onCancel={() => setShowForm(false)}
-    />
-  );
 
   return (
     <div>
@@ -956,11 +951,12 @@ function SalesView({ isAdmin, emps, events }) {
               <div style={{flex:1}}>
                 <div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{ename(s.employeeId)}</div>
                 {ev && <div style={{fontSize:12,color:T.muted}}>{ev.name} · {ev.city}</div>}
+                {!ev && s.customEventName && <div style={{fontSize:12,color:T.muted}}>{s.customEventName}</div>}
                 <div style={{fontSize:12,color:T.muted}}>{fmtDate(s.date)}</div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:16,fontWeight:700,color:T.amber}}>${total.toFixed(2)}</div>
-                {isAdmin && <button style={{...css.delbtn,marginTop:4,padding:"3px 8px",fontSize:11}} onClick={()=>del(s.id)}>Del</button>}
+                {isAdmin && <div style={{display:"flex",gap:4,marginTop:4}}><button style={{...css.editbtn,padding:"3px 8px",fontSize:11}} onClick={()=>setEditing(s)}>Edit</button><button style={{...css.delbtn,padding:"3px 8px",fontSize:11}} onClick={()=>del(s.id)}>Del</button></div>}
               </div>
             </div>
             <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
@@ -995,18 +991,29 @@ function SalesView({ isAdmin, emps, events }) {
   );
 }
 
-function SalesForm({ emps, events, onSave, onCancel }) {
-  const [empId,   setEmpId]   = useState(emps[0]?.id||"");
-  const [eventId, setEventId] = useState(events[0]?.id||"");
-  const [date,    setDate]    = useState(toKey());
-  const [vals,    setVals]    = useState({});
+function SalesForm({ emps, events, init, onSave, onCancel }) {
+  const [empId,      setEmpId]      = useState(init?.employeeId || emps[0]?.id||"");
+  const [eventId,    setEventId]    = useState(init?.eventId    || "");
+  const [customName, setCustomName] = useState(init?.customEventName || "");
+  const [useCustom,  setUseCustom]  = useState(!!init?.customEventName);
+  const [date,       setDate]       = useState(init?.date       || toKey());
+  const [vals,       setVals]       = useState(
+    init ? Object.fromEntries(Object.entries(init).filter(([k])=>k!=="id"&&k!=="employeeId"&&k!=="eventId"&&k!=="date"&&k!=="customEventName")) : {}
+  );
 
   const setVal = (k,v) => setVals(p=>({...p,[k]:v}));
   const total = CATEGORIES.reduce((sum,c)=>sum+(parseFloat(vals[c.id])||0),0);
 
   const go = () => {
     if (!empId) return alert("Select an employee.");
-    const entry = { employeeId:empId, eventId, date, ...vals };
+    if (useCustom && !customName.trim()) return alert("Enter an event name.");
+    const entry = {
+      employeeId: empId,
+      eventId: useCustom ? "" : eventId,
+      customEventName: useCustom ? customName.trim() : "",
+      date,
+      ...vals
+    };
     onSave(entry);
   };
 
@@ -1020,10 +1027,17 @@ function SalesForm({ emps, events, onSave, onCancel }) {
           {emps.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
         <label style={css.lbl}>Event / Market</label>
-        <select style={css.inp} value={eventId} onChange={e=>setEventId(e.target.value)}>
-          <option value="">No specific event</option>
-          {events.map(e=><option key={e.id} value={e.id}>{e.name} — {fmtDate(e.date)}</option>)}
-        </select>
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
+          <button style={{...css.radio,...(!useCustom?css.radioon:{})}} onClick={()=>setUseCustom(false)}>From Events List</button>
+          <button style={{...css.radio,...(useCustom?css.radioon:{})}} onClick={()=>setUseCustom(true)}>Custom Name</button>
+        </div>
+        {useCustom
+          ? <input style={css.inp} value={customName} onChange={e=>setCustomName(e.target.value)} placeholder="e.g. Cherry Creek Farmers Market"/>
+          : <select style={css.inp} value={eventId} onChange={e=>setEventId(e.target.value)}>
+              <option value="">No specific event</option>
+              {events.map(e=><option key={e.id} value={e.id}>{e.name} — {fmtDate(e.date)}</option>)}
+            </select>
+        }
         <label style={css.lbl}>Date</label>
         <input type="date" style={css.inp} value={date} onChange={e=>setDate(e.target.value)}/>
         <label style={css.lbl}>Sales by Category</label>
@@ -1275,4 +1289,3 @@ function ChatView({ sops, steps, tpls }) {
     </div>
   );
 }
-
