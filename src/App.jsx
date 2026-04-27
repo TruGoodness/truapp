@@ -346,7 +346,7 @@ export default function App() {
           </button>
         </header>
         <nav style={css.nav}>
-          {[["work","Work"],["markets","Markets"],["events","Events"],...(isAdmin?[["sales","Sales"]]:[]),["sops","SOPs"],["team","Team"],["chat","Ask"]].map(([id,l]) => (
+          {[["work","Work"],["markets","Markets"],["events","Events"],...(isAdmin?[["sales","Sales"]]:[]),["sops","SOPs"],["team","Team"],["inbox","Inbox"],["chat","Ask"]].map(([id,l]) => (
             <button key={id} style={{...css.nb,...(tab===id?css.na:{})}} onClick={()=>setTab(id)}>{l}</button>
           ))}
         </nav>
@@ -357,6 +357,7 @@ export default function App() {
           {tab==="team"    && <TeamView    emps={emps} saveEmps={saveEmps} isAdmin={isAdmin} authUser={authUser}/>}
           {tab==="events"  && <EventsView  isAdmin={isAdmin}/>}
           {tab==="sales"   && <SalesView   isAdmin={isAdmin} emps={emps} events={events}/>}
+          {tab==="inbox"   && <InboxView   user={user} emps={emps} isAdmin={isAdmin}/>}
           {tab==="chat"    && <ChatView    sops={sops} steps={steps} tpls={tpls}/>}
         </main>
       </div>
@@ -814,6 +815,9 @@ function SalesView({ isAdmin, emps, events }) {
 
   if (!sales) return <div style={{padding:32,textAlign:"center",color:T.muted}}>Loading...</div>;
 
+  const now = toKey();
+  const upcomingEvents = (events||[]).filter(e=>e.date<=now).sort((a,b)=>b.date.localeCompare(a.date));
+
   if (showForm) return <SalesForm emps={emps} events={upcomingEvents} onSave={v=>{saveSales([...sales,{...v,id:uid()}]);setShowForm(false);}} onCancel={()=>setShowForm(false)}/>;
   if (editing)  return <SalesForm emps={emps} events={upcomingEvents} init={editing} onSave={v=>{saveSales(sales.map(s=>s.id===editing.id?{...s,...v}:s));setEditing(null);}} onCancel={()=>setEditing(null)}/>;
 
@@ -822,8 +826,6 @@ function SalesView({ isAdmin, emps, events }) {
 
   // Filter sales
   const now = toKey();
-  const upcomingEvents = (events||[]).filter(e=>e.date<=now).sort((a,b)=>b.date.localeCompare(a.date));
-  
   let visible = [...sales];
   if (filter !== "all") visible = visible.filter(s=>s.employeeId===filter);
   if (selEvent !== "all") visible = visible.filter(s=>s.eventId===selEvent);
@@ -1415,6 +1417,313 @@ function EventForm({ init, onSave, onCancel }) {
         <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}}>
           <button style={css.cancelbtn} onClick={onCancel}>Cancel</button>
           <button style={css.savebtn} onClick={go}>Save Event</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+// ── INBOX ─────────────────────────────────────────────────────────────────────
+const REQ_CATS = [
+  { id:"repair",    label:"Repair / Maintenance", icon:"🔧", color:"#E74C3C", hasPhoto:true  },
+  { id:"supply",    label:"Supply Request",        icon:"📦", color:"#F5A623", hasPhoto:false },
+  { id:"wholesale", label:"Wholesale Inquiry",     icon:"🤝", color:"#2ECC71", hasPhoto:true  },
+  { id:"customer",  label:"Customer Inquiry",      icon:"👤", color:"#3498DB", hasPhoto:false },
+  { id:"issue",     label:"Issue / Problem",       icon:"⚠️", color:"#E67E22", hasPhoto:true  },
+  { id:"suggestion",label:"Suggestion",            icon:"💡", color:"#9B59B6", hasPhoto:false },
+  { id:"question",  label:"Employee Question",     icon:"❓", color:"#1ABC9C", hasPhoto:false },
+  { id:"general",   label:"General",               icon:"📋", color:"#7A9BB5", hasPhoto:false },
+];
+
+function InboxView({ user, emps, isAdmin }) {
+  const [requests, setRequests] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [viewing,  setViewing]  = useState(null);
+  const [filter,   setFilter]   = useState("all");
+
+  useEffect(() => { dbGet("requests").then(d => setRequests(d||[])); }, []);
+
+  const saveRequests = async v => { setRequests(v); await dbSet("requests", v); };
+
+  const addRequest = async req => {
+    const newReq = { ...req, id:uid(), submittedBy:user.id, submittedAt:Date.now(), status:"pending", seenByAdmin:false, replies:[], visibleTo:[] };
+    await saveRequests([...(requests||[]), newReq]);
+    setShowForm(false);
+  };
+
+  const markSeen = async req => {
+    if (isAdmin && !req.seenByAdmin) {
+      await saveRequests(requests.map(r => r.id===req.id ? {...r, seenByAdmin:true} : r));
+    }
+  };
+
+  const updateRequest = async updated => {
+    await saveRequests(requests.map(r => r.id===updated.id ? updated : r));
+    setViewing(updated);
+  };
+
+  if (!requests) return <div style={{padding:32,textAlign:"center",color:T.muted}}>Loading...</div>;
+
+  const ename  = id => emps.find(e=>e.id===id)?.name  || id;
+  const ecolor = id => emps.find(e=>e.id===id)?.color || T.muted;
+
+  // Filter what this user can see
+  const visible = requests.filter(r => {
+    if (isAdmin) return true;
+    if (r.submittedBy === user.id) return true;
+    if (r.visibleTo && r.visibleTo.includes(user.id)) return true;
+    return false;
+  });
+
+  // Apply category filter
+  const filtered = filter==="all" ? visible : visible.filter(r=>r.cat===filter);
+  const sorted = [...filtered].sort((a,b) => b.submittedAt - a.submittedAt);
+  const unread = visible.filter(r => isAdmin && !r.seenByAdmin).length;
+
+  if (showForm) return <RequestForm user={user} onSave={addRequest} onCancel={()=>setShowForm(false)}/>;
+  if (viewing)  return <RequestDetail req={viewing} user={user} emps={emps} isAdmin={isAdmin} onBack={()=>setViewing(null)} onUpdate={updateRequest} onMarkSeen={markSeen}/>;
+
+  return (
+    <div>
+      <div style={css.vhead}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <h2 style={css.vtitle}>Inbox</h2>
+          {unread>0&&<div style={{background:T.red,color:"#fff",borderRadius:99,padding:"2px 8px",fontSize:12,fontWeight:700}}>{unread}</div>}
+        </div>
+        <button style={css.addbtn} onClick={()=>setShowForm(true)}>+ New Request</button>
+      </div>
+
+      {/* Category filter */}
+      <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",paddingBottom:2}}>
+        <button style={{...css.chip,...(filter==="all"?{...css.chipon,background:"#1A2A6C",borderColor:"#1A2A6C"}:{})}} onClick={()=>setFilter("all")}>All</button>
+        {REQ_CATS.map(c=>(
+          <button key={c.id} style={{...css.chip,...(filter===c.id?{...css.chipon,background:c.color,borderColor:c.color}:{})}} onClick={()=>setFilter(c.id)}>{c.icon} {c.label}</button>
+        ))}
+      </div>
+
+      {!sorted.length&&<Empty icon="📬" text="No requests yet" hint="Tap + New Request to submit one."/>}
+
+      {sorted.map(r => {
+        const cat = REQ_CATS.find(c=>c.id===r.cat)||REQ_CATS[7];
+        const isUnread = isAdmin && !r.seenByAdmin;
+        const statusColor = r.status==="resolved"?T.green:r.status==="inprogress"?T.amber:T.muted;
+        const statusLabel = r.status==="resolved"?"✓ Resolved":r.status==="inprogress"?"In Progress":"Pending";
+        return (
+          <button key={r.id} style={{...css.soprow,flexDirection:"column",alignItems:"stretch",position:"relative"}} onClick={()=>{setViewing(r);markSeen(r);}}>
+            {isUnread&&<div style={{position:"absolute",top:10,right:10,width:8,height:8,borderRadius:"50%",background:T.red}}/>}
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <div style={{width:36,height:36,borderRadius:10,background:cat.color+"22",border:`1px solid ${cat.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{cat.icon}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:14,fontWeight:600,color:"#fff"}}>{r.subject||cat.label}</div>
+                <div style={{fontSize:12,color:T.muted}}>{ename(r.submittedBy)} · {new Date(r.submittedAt).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+              </div>
+              <span style={{...css.badge,background:statusColor+"22",color:statusColor}}>{statusLabel}</span>
+            </div>
+            <div style={{fontSize:13,color:T.muted,textAlign:"left",paddingLeft:46}}>{r.message?r.message.slice(0,80)+(r.message.length>80?"...":""):""}</div>
+            {r.replies&&r.replies.length>0&&<div style={{fontSize:11,color:T.muted,textAlign:"left",paddingLeft:46,marginTop:4}}>{r.replies.length} {r.replies.length===1?"reply":"replies"}</div>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function RequestDetail({ req, user, emps, isAdmin, onBack, onUpdate, onMarkSeen }) {
+  const [reply,      setReply]      = useState("");
+  const [status,     setStatus]     = useState(req.status);
+  const [visibleTo,  setVisibleTo]  = useState(req.visibleTo||[]);
+  const cat = REQ_CATS.find(c=>c.id===req.cat)||REQ_CATS[7];
+  const ename  = id => emps.find(e=>e.id===id)?.name  || id;
+  const ecolor = id => emps.find(e=>e.id===id)?.color || T.muted;
+
+  const sendReply = () => {
+    if (!reply.trim()) return;
+    const newReply = { id:uid(), from:user.id, message:reply.trim(), sentAt:Date.now() };
+    const updated = { ...req, replies:[...(req.replies||[]), newReply], status, visibleTo, seenByAdmin:true };
+    onUpdate(updated);
+    setReply("");
+  };
+
+  const toggleVisible = empId => {
+    setVisibleTo(p => p.includes(empId) ? p.filter(id=>id!==empId) : [...p, empId]);
+  };
+
+  const saveVisibility = () => {
+    onUpdate({...req, visibleTo, status});
+  };
+
+  return (
+    <div>
+      <button style={css.back} onClick={onBack}>← Back</button>
+
+      {/* Request header */}
+      <div style={css.card}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <div style={{width:40,height:40,borderRadius:10,background:cat.color+"22",border:`1px solid ${cat.color}44`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{cat.icon}</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:16,fontWeight:600,color:"#fff"}}>{req.subject||cat.label}</div>
+            <div style={{fontSize:12,color:T.muted}}>{cat.label} · {ename(req.submittedBy)} · {new Date(req.submittedAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+          </div>
+        </div>
+
+        {/* Message */}
+        {req.message&&<div style={{...css.nbox,marginBottom:10}}>{req.message}</div>}
+
+        {/* Customer inquiry fields */}
+        {req.cat==="customer"&&(req.customerName||req.customerPhone)&&(
+          <div style={{background:"#111D2E",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+            {req.customerName&&<div style={{fontSize:13,color:"#fff",marginBottom:4}}><b>Name:</b> {req.customerName}</div>}
+            {req.customerPhone&&<div style={{fontSize:13,color:"#fff"}}><b>Phone:</b> {req.customerPhone}</div>}
+          </div>
+        )}
+
+        {/* Photo */}
+        {req.photo&&<img src={`data:${req.photoType};base64,${req.photo}`} style={{width:"100%",borderRadius:8,border:`1px solid ${T.bdr}`,marginBottom:10}} alt="attachment"/>}
+
+        {/* Seen indicator */}
+        <div style={{fontSize:12,color:req.seenByAdmin?T.green:T.muted}}>
+          {req.seenByAdmin?"✓ Seen by Marc":"Not yet seen"}
+        </div>
+      </div>
+
+      {/* Status (admin only) */}
+      {isAdmin&&(
+        <div style={css.card}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>Status</div>
+          <div style={css.radios}>
+            {[["pending","Pending"],["inprogress","In Progress"],["resolved","Resolved"]].map(([v,l])=>(
+              <button key={v} style={{...css.radio,...(status===v?css.radioon:{})}} onClick={()=>setStatus(v)}>{l}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Visibility (admin only) */}
+      {isAdmin&&(
+        <div style={css.card}>
+          <div style={{fontSize:12,fontWeight:700,color:T.muted,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:8}}>Visible To</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+            {emps.filter(e=>e.id!==req.submittedBy&&e.id!=="marc").map(e=>(
+              <button key={e.id}
+                style={{...css.chip,...(visibleTo.includes(e.id)?{...css.chipon,background:e.color,borderColor:e.color}:{})}}
+                onClick={()=>toggleVisible(e.id)}>
+                {e.name}
+              </button>
+            ))}
+          </div>
+          <button style={{...css.savebtn,width:"100%",padding:10}} onClick={saveVisibility}>Save Visibility & Status</button>
+        </div>
+      )}
+
+      {/* Replies */}
+      <div style={css.card}>
+        <div style={{fontSize:12,fontWeight:700,color:T.muted,letterSpacing:"0.06em",textTransform:"uppercase",marginBottom:10}}>
+          {req.replies&&req.replies.length>0?"Replies":"No replies yet"}
+        </div>
+        {(req.replies||[]).map(r=>(
+          <div key={r.id} style={{display:"flex",justifyContent:r.from===user.id?"flex-end":"flex-start",marginBottom:10}}>
+            <div style={{maxWidth:"85%",background:r.from===user.id?"linear-gradient(135deg,#1A2A6C,#B21F1F)":T.surf,border:r.from===user.id?"none":`1px solid ${T.bdr}`,borderRadius:r.from===user.id?"16px 16px 4px 16px":"16px 16px 16px 4px",padding:"10px 14px"}}>
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.6)",marginBottom:4}}>{ename(r.from)} · {new Date(r.sentAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
+              <div style={{fontSize:14,color:"#fff",lineHeight:1.5}}>{r.message}</div>
+            </div>
+          </div>
+        ))}
+
+        {/* Reply input */}
+        <div style={{borderTop:`1px solid ${T.bdr}`,paddingTop:12,marginTop:4}}>
+          <textarea
+            style={{...css.inp,minHeight:72,resize:"vertical",marginBottom:8}}
+            value={reply}
+            onChange={e=>setReply(e.target.value)}
+            placeholder="Write a reply..."
+          />
+          <button style={{...css.savebtn,width:"100%",padding:10}} onClick={sendReply}>Send Reply</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RequestForm({ user, onSave, onCancel }) {
+  const [cat,          setCat]          = useState("general");
+  const [subject,      setSubject]      = useState("");
+  const [message,      setMessage]      = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone,setCustomerPhone]= useState("");
+  const [photo,        setPhoto]        = useState(null);
+  const [photoType,    setPhotoType]    = useState(null);
+  const [uploading,    setUploading]    = useState(false);
+
+  const selCat = REQ_CATS.find(c=>c.id===cat);
+
+  const handlePhoto = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    if (f.size>4.5*1024*1024) return alert("Max 4.5MB");
+    setUploading(true);
+    const r = new FileReader();
+    r.onload = ev => { setPhoto(ev.target.result.split(",")[1]); setPhotoType(f.type); setUploading(false); };
+    r.readAsDataURL(f);
+  };
+
+  const go = () => {
+    if (!message.trim()&&cat!=="customer") return alert("Please enter a message.");
+    if (cat==="customer"&&!customerName.trim()) return alert("Please enter the customer name.");
+    onSave({ cat, subject:subject.trim(), message:message.trim(), customerName:customerName.trim(), customerPhone:customerPhone.trim(), photo, photoType });
+  };
+
+  return (
+    <div>
+      <button style={css.back} onClick={onCancel}>← Cancel</button>
+      <div style={css.form}>
+        <div style={css.ftitle}>New Request</div>
+
+        <label style={css.lbl}>Category</label>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+          {REQ_CATS.map(c=>(
+            <button key={c.id}
+              style={{...css.chip,...(cat===c.id?{...css.chipon,background:c.color,borderColor:c.color}:{})}}
+              onClick={()=>setCat(c.id)}>
+              {c.icon} {c.label}
+            </button>
+          ))}
+        </div>
+
+        <label style={css.lbl}>Subject (optional)</label>
+        <input style={css.inp} value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Brief summary..."/>
+
+        {/* Customer inquiry fields */}
+        {cat==="customer"&&<>
+          <label style={css.lbl}>Customer Name *</label>
+          <input style={css.inp} value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Full name"/>
+          <label style={css.lbl}>Customer Phone</label>
+          <input style={css.inp} type="tel" value={customerPhone} onChange={e=>setCustomerPhone(e.target.value)} placeholder="(303) 555-0000"/>
+        </>}
+
+        <label style={css.lbl}>Message{cat==="customer"?" / Notes":""}</label>
+        <textarea style={{...css.inp,minHeight:100,resize:"vertical"}} value={message} onChange={e=>setMessage(e.target.value)} placeholder={
+          cat==="repair"?"Describe what needs repair...":
+          cat==="supply"?"What supplies are needed and how many?":
+          cat==="wholesale"?"Tell us about the business...":
+          cat==="customer"?"Any additional notes about this customer...":
+          cat==="issue"?"Describe what happened...":
+          "Your message..."
+        }/>
+
+        {/* Photo upload */}
+        {selCat?.hasPhoto&&<>
+          <label style={css.lbl}>Attach Photo (optional)</label>
+          <label style={{...css.savebtn,display:"inline-block",cursor:"pointer",padding:"8px 16px",borderRadius:8,marginBottom:4}}>
+            {uploading?"Uploading...":photo?"Replace Photo":"📷 Attach Photo"}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handlePhoto} disabled={uploading}/>
+          </label>
+          {photo&&<div style={{marginTop:8}}><img src={`data:${photoType};base64,${photo}`} style={{width:"100%",maxHeight:200,objectFit:"cover",borderRadius:8,border:`1px solid ${T.bdr}`}} alt="preview"/></div>}
+        </>}
+
+        <div style={{display:"flex",gap:8,marginTop:16,justifyContent:"flex-end"}}>
+          <button style={css.cancelbtn} onClick={onCancel}>Cancel</button>
+          <button style={css.savebtn} onClick={go}>Submit Request</button>
         </div>
       </div>
     </div>
