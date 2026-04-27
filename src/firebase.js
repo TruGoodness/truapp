@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, collection, addDoc, onSnapshot, deleteDoc, query, orderBy } from 'firebase/firestore';
-import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: "AIzaSyCW7f5X93PGq_9sSTS7mKO2_h7zgYEQqbo",
@@ -15,7 +15,6 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
-// Simple helpers that mirror old storage API
 export async function dbGet(key) {
   try {
     const snap = await getDoc(doc(db, 'appdata', key));
@@ -29,4 +28,4 @@ export async function dbSet(key, val) {
   } catch(e) { console.error('dbSet error:', e); }
 }
 
-export { doc, getDoc, setDoc, collection, addDoc, onSnapshot, deleteDoc, query, orderBy, signInWithEmailAndPassword, signOut, onAuthStateChanged };
+export { doc, getDoc, setDoc, collection, addDoc, onSnapshot, deleteDoc, query, orderBy, signInWithEmailAndPassword, signOut, onAuthStateChanged, sendPasswordResetEmail };
