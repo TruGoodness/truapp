@@ -825,7 +825,6 @@ function SalesView({ isAdmin, emps, events }) {
   const ecolor = id => emps.find(e=>e.id===id)?.color || T.muted;
 
   // Filter sales
-  const now = toKey();
   let visible = [...sales];
   if (filter !== "all") visible = visible.filter(s=>s.employeeId===filter);
   if (selEvent !== "all") visible = visible.filter(s=>s.eventId===selEvent);
