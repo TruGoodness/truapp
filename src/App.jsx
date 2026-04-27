@@ -1745,7 +1745,7 @@ function ChatView({ sops, steps, tpls }) {
     if(!input.trim()||busy)return;
     const um={role:"user",content:input.trim()};const nm=[...msgs,um];setMsgs(nm);setInput("");setBusy(true);
     try{
-      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,system:ctx(),tools:[{type:"web_search_20250305",name:"web_search"}],messages:nm.map(m=>({role:m.role,content:m.content}))})});
+      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,system:ctx(),messages:nm.map(m=>({role:m.role,content:m.content}))})});
       const d=await r.json();
       const reply=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n")||"Sorry, I couldn't get a response.";
       setMsgs(p=>[...p,{role:"assistant",content:reply}]);
