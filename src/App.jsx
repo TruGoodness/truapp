@@ -845,6 +845,7 @@ function SalesView({ isAdmin, emps, events }) {
       <div style={{display:"flex",gap:6,marginBottom:14}}>
         <button style={{...css.stab,...(view==="byPerson"?css.stabon:{})}} onClick={()=>setView("byPerson")}>By Person</button>
         <button style={{...css.stab,...(view==="byMarket"?css.stabon:{})}} onClick={()=>setView("byMarket")}>By Market</button>
+        <button style={{...css.stab,...(view==="cash"?css.stabon:{})}} onClick={()=>setView("cash")}>Cash</button>
       </div>
 
       {/* Market summary view */}
@@ -906,6 +907,21 @@ function SalesView({ isAdmin, emps, events }) {
               );
             })}
           </div>
+        );
+      })()}
+
+      {/* Cash Reconciliation view */}
+      {view==="cash" && (() => {
+        // Group sales by event for the date selector
+        const allDates = [...new Set(sales.map(s=>s.date))].sort((a,b)=>b.localeCompare(a));
+        return (
+          <CashReconciliation
+            sales={sales}
+            saveSales={saveSales}
+            emps={emps}
+            events={events}
+            allDates={allDates}
+          />
         );
       })()}
 
@@ -987,6 +1003,165 @@ function SalesView({ isAdmin, emps, events }) {
         );
       })}
       </>}
+    </div>
+  );
+}
+
+
+function CashReconciliation({ sales, saveSales, emps, events, allDates }) {
+  const [selDate, setSelDate] = useState(allDates[0] || toKey());
+  const [editing, setEditing] = useState({});
+
+  const daySales = sales.filter(s => s.date === selDate);
+  const ename  = id => emps.find(e=>e.id===id)?.name  || id;
+  const ecolor = id => emps.find(e=>e.id===id)?.color || T.muted;
+
+  const updateCash = (saleId, field, val) => {
+    setEditing(p => ({...p, [saleId+field]: val}));
+  };
+
+  const saveAll = () => {
+    const updated = sales.map(s => {
+      const cashSales = editing[s.id+"cashSales"] !== undefined ? editing[s.id+"cashSales"] : s.cashSales;
+      const cashInBag = editing[s.id+"cashInBag"] !== undefined ? editing[s.id+"cashInBag"] : s.cashInBag;
+      return {...s, cashSales, cashInBag};
+    });
+    saveSales(updated);
+    setEditing({});
+    alert("Cash reconciliation saved!");
+  };
+
+  const hasChanges = Object.keys(editing).length > 0;
+
+  return (
+    <div>
+      {/* Date selector */}
+      <label style={css.lbl}>Select Date</label>
+      <select style={{...css.inp, marginBottom:16}} value={selDate} onChange={e=>setSelDate(e.target.value)}>
+        {allDates.map(d => <option key={d} value={d}>{fmtDate(d)}</option>)}
+        <option value={toKey()}>{fmtDate(toKey())} (Today)</option>
+      </select>
+
+      {!daySales.length && (
+        <Empty icon="💵" text="No sales entries for this date" hint="Add a sales entry first in the By Person tab."/>
+      )}
+
+      {/* Summary totals across all people */}
+      {daySales.length > 0 && (() => {
+        const totalCashSales = daySales.reduce((sum,s)=>sum+(parseFloat(editing[s.id+"cashSales"]!==undefined?editing[s.id+"cashSales"]:s.cashSales)||0),0);
+        const totalCashInBag = daySales.reduce((sum,s)=>sum+(parseFloat(editing[s.id+"cashInBag"]!==undefined?editing[s.id+"cashInBag"]:s.cashInBag)||0),0);
+        const totalDiff = totalCashInBag - totalCashSales;
+        return (
+          <div style={{...css.card, marginBottom:16, background:"linear-gradient(135deg,#1A2A3A,#1A3A2A)"}}>
+            <div style={{fontFamily:"'DM Serif Display',serif",fontSize:16,color:"#fff",marginBottom:10}}>Team Cash Summary</div>
+            <div style={{display:"flex",gap:12,marginBottom:10}}>
+              <div style={{flex:1,background:"#111D2E",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontSize:11,color:T.muted}}>Total Cash Sales</div>
+                <div style={{fontSize:18,fontWeight:700,color:T.amber}}>${totalCashSales.toFixed(2)}</div>
+              </div>
+              <div style={{flex:1,background:"#111D2E",borderRadius:8,padding:"10px 12px"}}>
+                <div style={{fontSize:11,color:T.muted}}>Total In Bags</div>
+                <div style={{fontSize:18,fontWeight:700,color:T.green}}>${totalCashInBag.toFixed(2)}</div>
+              </div>
+            </div>
+            <div style={{
+              background: totalDiff<0?"#2A0A0A":totalDiff>0?"#0A2010":"#111D2E",
+              borderRadius:8,padding:"10px 14px",
+              border:`1px solid ${totalDiff<0?"#3D1515":totalDiff>0?"#0D3525":T.bdr}`
+            }}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>Overall Difference</span>
+                <span style={{fontSize:18,fontWeight:700,color:totalDiff<0?"#FF6B6B":totalDiff>0?T.green:T.muted}}>
+                  {totalDiff===0?"✓ All exact":totalDiff>0?"+$"+Math.abs(totalDiff).toFixed(2):"-$"+Math.abs(totalDiff).toFixed(2)}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Each person row */}
+      {daySales.map(s => {
+        const cashSales = editing[s.id+"cashSales"] !== undefined ? editing[s.id+"cashSales"] : (s.cashSales||"");
+        const cashInBag = editing[s.id+"cashInBag"] !== undefined ? editing[s.id+"cashInBag"] : (s.cashInBag||"");
+        const diff = (parseFloat(cashInBag)||0) - (parseFloat(cashSales)||0);
+        const isUnder = diff < 0;
+        const isOver  = diff > 0;
+        const ev = (events||[]).find(e=>e.id===s.eventId);
+        const totalSales = CATEGORIES.reduce((sum,c)=>sum+(parseFloat(s[c.id])||0),0);
+
+        return (
+          <div key={s.id} style={{...css.card, marginBottom:10}}>
+            {/* Person header */}
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+              <div style={{width:32,height:32,borderRadius:"50%",background:ecolor(s.employeeId),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:14,fontWeight:700,flexShrink:0}}>{ename(s.employeeId)[0]}</div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:15,fontWeight:600,color:"#fff"}}>{ename(s.employeeId)}</div>
+                <div style={{fontSize:11,color:T.muted}}>{ev?ev.name:s.customEventName||"No event"} · Total Sales: ${totalSales.toFixed(2)}</div>
+              </div>
+              {diff!==0&&(cashSales||cashInBag)&&<span style={{fontSize:18}}>{isUnder?"⚠️":"✅"}</span>}
+            </div>
+
+            {/* Cash inputs in a row */}
+            <div style={{display:"flex",gap:10,marginBottom:10}}>
+              <div style={{flex:1}}>
+                <label style={{...css.lbl,marginTop:0,marginBottom:4}}>Cash Sales</label>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{color:T.muted,fontSize:13}}>$</span>
+                  <input
+                    type="number" min="0" step="0.01"
+                    style={{...css.inp,marginBottom:0,textAlign:"right"}}
+                    value={cashSales}
+                    onChange={e=>updateCash(s.id,"cashSales",e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div style={{flex:1}}>
+                <label style={{...css.lbl,marginTop:0,marginBottom:4}}>In Money Bag</label>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{color:T.muted,fontSize:13}}>$</span>
+                  <input
+                    type="number" min="0" step="0.01"
+                    style={{...css.inp,marginBottom:0,textAlign:"right"}}
+                    value={cashInBag}
+                    onChange={e=>updateCash(s.id,"cashInBag",e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Difference indicator */}
+            {(cashSales||cashInBag)&&(
+              <div style={{
+                background:isUnder?"#2A0A0A":isOver?"#0A2010":"#111D2E",
+                borderRadius:8,padding:"8px 12px",
+                border:`1px solid ${isUnder?"#3D1515":isOver?"#0D3525":T.bdr}`,
+                display:"flex",justifyContent:"space-between",alignItems:"center"
+              }}>
+                <span style={{fontSize:13,color:isUnder?"#FF6B6B":isOver?T.green:"#fff"}}>
+                  {diff===0?"Exact match":isOver?"Over":"Short"}
+                </span>
+                <span style={{fontSize:15,fontWeight:700,color:isUnder?"#FF6B6B":isOver?T.green:T.muted}}>
+                  {diff===0?"✓":isOver?"+$"+Math.abs(diff).toFixed(2):"-$"+Math.abs(diff).toFixed(2)}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Save all button */}
+      {daySales.length > 0 && (
+        <button
+          style={{...css.savebtn, width:"100%", padding:12, fontSize:15, opacity:hasChanges?1:0.5}}
+          onClick={saveAll}
+          disabled={!hasChanges}
+        >
+          {hasChanges?"Save All Cash Entries":"No Changes to Save"}
+        </button>
+      )}
     </div>
   );
 }
