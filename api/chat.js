@@ -6,7 +6,12 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'not allowed' });
   try {
     const key = process.env.ANTHROPIC_KEY;
-    if (!key) return res.status(500).json({ error: 'No API key' });
+    if (!key) return res.status(500).json({ error: 'No API key found in environment' });
+    
+    // Log first 10 chars of key for debugging
+    console.log('Key starts with:', key.substring(0, 15));
+    console.log('Key length:', key.length);
+    
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -16,9 +21,8 @@ module.exports = async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-3-haiku-20240307',
-        max_tokens: 1200,
-        system: req.body.system,
-        messages: req.body.messages,
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'Say hello' }],
       }),
     });
     const data = await r.json();
