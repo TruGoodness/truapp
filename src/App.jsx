@@ -1790,11 +1790,16 @@ function ChatView({ sops, steps, tpls }) {
     if(!input.trim()||busy)return;
     const um={role:"user",content:input.trim()};const nm=[...msgs,um];setMsgs(nm);setInput("");setBusy(true);
     try{
-      const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-ipc":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,system:ctx(),messages:nm.map(m=>({role:m.role,content:m.content}))})});
-      const d=await r.json();
-      const reply=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n")||"Sorry, I couldn't get a response.";
+      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,system:ctx(),messages:nm.map(m=>({role:m.role,content:m.content}))})});
+      const text=await r.text();
+      let d;
+      try{d=JSON.parse(text);}catch(e){setMsgs(p=>[...p,{role:"assistant",content:"Parse error: "+text.slice(0,300)}]);setBusy(false);return;}
+      if(d.error){setMsgs(p=>[...p,{role:"assistant",content:"API error: "+JSON.stringify(d.error)}]);setBusy(false);return;}
+      const reply=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n")||"No content. Raw: "+JSON.stringify(d).slice(0,200);
       setMsgs(p=>[...p,{role:"assistant",content:reply}]);
-    }catch{setMsgs(p=>[...p,{role:"assistant",content:"Sorry, something went wrong. Please try again."}]);}
+    }catch(err){
+      setMsgs(p=>[...p,{role:"assistant",content:"Fetch error: "+err.message}]);
+    }
     setBusy(false);
   };
   const SUGG=["How do I connect the couplers?","What goes in the black bin?","What flavors do we sell?","Food safety rules"];
