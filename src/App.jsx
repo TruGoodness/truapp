@@ -1,3 +1,84 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { db, auth, dbGet, dbSet, signInWithEmailAndPassword, signOut, onAuthStateChanged, doc, setDoc, onSnapshot, sendPasswordResetEmail } from './firebase';
+
+const uid = () => Math.random().toString(36).slice(2, 9);
+const toKey = () => new Date().toISOString().split("T")[0];
+const nextDay = () => { const d = new Date(); d.setDate(d.getDate()+1); return d.toISOString().split("T")[0]; };
+const getNextRecurringDate = (recurring) => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  if (recurring === "daily") return d.toISOString().split("T")[0];
+  if (recurring === "weekly") { d.setDate(d.getDate() + 6); return d.toISOString().split("T")[0]; }
+  if (recurring === "mon-wed-fri") {
+    while (![1,3,5].includes(d.getDay())) d.setDate(d.getDate()+1);
+    return d.toISOString().split("T")[0];
+  }
+  if (recurring === "tue-thu") {
+    while (![2,4].includes(d.getDay())) d.setDate(d.getDate()+1);
+    return d.toISOString().split("T")[0];
+  }
+  if (recurring === "weekends") {
+    while (![0,6].includes(d.getDay())) d.setDate(d.getDate()+1);
+    return d.toISOString().split("T")[0];
+  }
+  return null;
+};
+const fmtDate = s => { try { const [y,m,d]=s.split("-"); return `${m}/${d}/${y}`; } catch { return s; } };
+
+const ADMIN_EMAIL = "marc.gaudreault@gmail.com";
+const COLS = ["#F5A623","#2ECC71","#9B59B6","#E74C3C","#3498DB","#E67E22","#1ABC9C","#E91E63"];
+const FONT = "https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap";
+
+const PHASES = [
+  { id:"premarket", label:"Pre-Market",  icon:"📦", color:"#3498DB" },
+  { id:"setup",     label:"Setup",       icon:"🚛", color:"#F5A623" },
+  { id:"during",    label:"During",      icon:"🛖", color:"#2ECC71" },
+  { id:"breakdown", label:"Breakdown",   icon:"📋", color:"#9B59B6" },
+  { id:"return",    label:"Return",      icon:"🏠", color:"#E67E22" },
+];
+const PG = [{ key:"loadout", label:"Load Out", icon:"🚐" },{ key:"bin", label:"Black Bin", icon:"🗑" }];
+const WCATS = [
+  { id:"production", label:"Production", icon:"🧃", color:"#F5A623" },
+  { id:"cleaning",   label:"Cleaning",   icon:"🧹", color:"#2ECC71" },
+  { id:"equipment",  label:"Equipment",  icon:"⚙",  color:"#9B59B6" },
+  { id:"vehicle",    label:"Vehicle",    icon:"🚐", color:"#3498DB" },
+];
+const SCATS = [
+  { id:"product",   label:"Product",        icon:"🧃", color:"#F5A623" },
+  { id:"equipment", label:"Equipment",       icon:"⚙",  color:"#2ECC71" },
+  { id:"health",    label:"Health & Safety", icon:"🧼", color:"#E74C3C" },
+];
+
+const DEMPS = [{ id:"marc", name:"Marc", color:COLS[0], role:"admin", noteMode:"toggle", email:ADMIN_EMAIL }];
+
+const DSOPS = [
+  { id:"s1",  cat:"product",   title:"Kegging Process",                content:"", videoUrl:"", videoFile:null },
+  { id:"s2",  cat:"product",   title:"Filling Bottles (32oz & 64oz)",  content:"", videoUrl:"", videoFile:null },
+  { id:"s3",  cat:"product",   title:"Product Quality Standards",       content:"", videoUrl:"", videoFile:null },
+  { id:"s4",  cat:"equipment", title:"Jockey Box Setup & Operation",    content:"", videoUrl:"", videoFile:null },
+  { id:"s5",  cat:"equipment", title:"CO2 System & Regulator",          content:"", videoUrl:"", videoFile:null },
+  { id:"s6",  cat:"equipment", title:"Line Cleaning & Sanitization",    content:"", videoUrl:"", videoFile:null },
+  { id:"s7",  cat:"equipment", title:"Coupler Connection Procedure",    content:"", videoUrl:"", videoFile:null },
+  { id:"s8",  cat:"health",    title:"Food Handler Requirements",       content:"A hand wash station must be set up and operational before serving begins.\n\n1. HAND WASH STATION SETUP\n- Water at 85°F–125°F\n- Soap\n- Paper towels\n- Gray water bucket underneath\n\n2. HAND WASHING\nWash hands at minimum once per hour. Also wash when switching tasks (e.g. money to ice), touching face or hair, or any time common sense says to.\n\n3. CUP & ICE HANDLING\n- Never stick fingers inside a cup\n- Handle cups from the outside only\n- Never touch the drinking edge of any cup", videoUrl:"", videoFile:null },
+  { id:"s9",  cat:"health",    title:"Hand Washing & Hygiene Standards",content:"", videoUrl:"", videoFile:null },
+  { id:"s10", cat:"health",    title:"Sample Handling & Serving",       content:"", videoUrl:"", videoFile:null },
+  { id:"s11", cat:"health",    title:"Gray Water & Waste Disposal",     content:"All gray water must be returned to the Tru Goodness facility.\n\n1. Keep a dedicated gray water bucket at the hand wash station at all times.\n2. Do NOT empty the gray water bucket at the market.\n3. Cover/seal the bucket before loading into the vehicle.\n4. Empty into a designated sink at the facility.\n\nSome markets issue fines or remove vendors for improper disposal. This is non-negotiable.", videoUrl:"", videoFile:null },
+  { id:"s12", cat:"health",    title:"Food Handling & Product Safety",  content:"All Tru Goodness products are shelf stable — kombucha, lemonade, ginger beer, cold brew, and oat milk. All products are in a reduced oxygen environment.\n\n1. SHELF STABILITY\nKnow this and communicate it confidently if the health department visits.\n\n2. HEALTH DEPARTMENT\nRemain calm. Direct questions you cannot answer to Marc immediately.\n\n3. LICENSES & PERMITS\nWe carry a mobile license and temporary restaurant permit for every county we operate in. These are available in the Licenses section of this app.", videoUrl:"", videoFile:null },
+  { id:"s13", cat:"health",    title:"Inclement Weather Safety",        content:"If you experience inclement weather at a market:\n\n1. SECURE THE CANOPY\nMake sure your canopy is fastened securely. There should be red straps in your black bin. Tie them to full kegs, the van, a sign post, or a light pole. You can also grab the center of the tent to stabilize it.\n\n2. ASSESS SAFETY\nIf you feel unsafe, you are authorized to begin packing up. If there is time, call Marc first, then report to the market manager before leaving. In most cases they will not stop you — it adds liability to them.\n\n3. NEVER RISK YOUR SAFETY\nNo sale is worth getting hurt. Equipment can be replaced. Use your judgment and act quickly.", videoUrl:"", videoFile:null },
+];
+
+const DTPLS = [
+  { id:"t1",  cat:"production", title:"Make tea for kombucha",  xLabel:null,      defEmp:null },
+  { id:"t2",  cat:"production", title:"Make lemonade",          xLabel:null,      defEmp:null },
+  { id:"t3",  cat:"production", title:"Brew coffee",            xLabel:null,      defEmp:null },
+  { id:"t4",  cat:"production", title:"Grind coffee beans",     xLabel:null,      defEmp:null },
+  { id:"t5",  cat:"production", title:"Bag ice",                xLabel:null,      defEmp:null },
+  { id:"t6",  cat:"production", title:"Keg ginger beer",        xLabel:null,      defEmp:null },
+  { id:"t7",  cat:"production", title:"Keg cold brew",          xLabel:null,      defEmp:null },
+  { id:"t8",  cat:"production", title:"Keg lemonade",           xLabel:null,      defEmp:null },
+  { id:"t9",  cat:"production", title:"Keg Beejola",            xLabel:null,      defEmp:null },
+  { id:"t10", cat:"production", title:"Keg kombucha",           xLabel:null,      defEmp:null },
+  { id:"t11", cat:"production", title:"Can cans",               xLabel:null,      defEmp:null },
   { id:"t12", cat:"production", title:"Make jam",               xLabel:"Flavors", defEmp:null },
   { id:"t13", cat:"cleaning",   title:"Clean kegs",             xLabel:null,      defEmp:null },
   { id:"t14", cat:"cleaning",   title:"Wash outside of kegs",   xLabel:null,      defEmp:null },
@@ -7,7 +88,10 @@
   { id:"t18", cat:"cleaning",   title:"Wash rags",              xLabel:null,      defEmp:null },
   { id:"t19", cat:"cleaning",   title:"Clean floors",           xLabel:null,      defEmp:null },
   { id:"t20", cat:"equipment",  title:"Clean tanks",            xLabel:"Tank #",  defEmp:null },
-  { id:"t21", cat:"vehicle",    title:"Clean van",              xLabel:"Van #",   defEmp:null },
+  { id:"t21", cat:"vehicle",    title:"Clean van",              xLabel:"Van #",   defEmp:null, recurring:null },
+  { id:"t22", cat:"production",  title:"Fill bottles",            xLabel:null,     defEmp:null, recurring:null },
+  { id:"t23", cat:"production",  title:"Prepare home deliveries", xLabel:null,     defEmp:null, recurring:null },
+  { id:"t24", cat:"vehicle",     title:"Deliveries",              xLabel:null,     defEmp:null, recurring:null },
 ];
 
 const DSTEPS = [
@@ -329,9 +413,19 @@ export default function App() {
           </button>
         </header>
         <nav style={css.nav}>
-          {[["work","Work"],["markets","Markets"],["events","Events"],...(isAdmin?[["sales","Sales"]]:[]),["sops","SOPs"],["team","Team"],["inbox","Inbox"],["chat","Ask"]].map(([id,l]) => (
+          {(()=>{
+          const role=user?.role||"staff";
+          return [["work","Work"],["markets","Markets"],
+            ...(["admin","manager","warehouse"].includes(role)?[["events","Events"]]:[]),
+            ...(isAdmin?[["sales","Sales"]]:[]),
+            ["sops","SOPs"],
+            ...(isAdmin?[["team","Team"]]:[]),
+            ["inbox","Inbox"],
+            ["chat","Ask"]
+          ];
+        })().map(([id,l]) => (
             <button key={id} style={{...css.nb,...(tab===id?css.na:{})}} onClick={()=>setTab(id)}>{l}</button>
-          ))}
+          ))})
         </nav>
         <main style={{padding:16}}>
           {tab==="work"    && <WorkView    user={user} emps={emps} tpls={tpls} asgns={asgns} saveTpls={saveTpls} saveAsgns={saveAsgns} isAdmin={isAdmin}/>}
@@ -377,7 +471,20 @@ function MyTasks({ mine, allAsgns, user, saveAsgns }) {
     const hist = (await dbGet("taskHistory")) || [];
     hist.push({ id:uid(), title:a.title, xLabel:a.xLabel, xVal:a.xVal, assignedTo:a.assignedTo, dueDate:a.dueDate, completedDate:toKey(), completedAt:Date.now(), note:note.trim() });
     await dbSet("taskHistory", hist);
-    saveAsgns(allAsgns.map(x => x.id===id ? {...x,status:"complete",completionNote:note,completedAt:Date.now()} : x));
+    const updatedAsgns = allAsgns.map(x => x.id===id ? {...x,status:"complete",completionNote:note,completedAt:Date.now()} : x);
+    // Auto-create next recurring assignment
+    if (a.recurring) {
+      const nextDate = getNextRecurringDate(a.recurring);
+      if (nextDate) {
+        updatedAsgns.push({
+          id:uid(), title:a.title, xLabel:a.xLabel, xVal:a.xVal,
+          assignedTo:a.assignedTo, dueDate:nextDate, status:"pending",
+          completionNote:"", completedAt:null, createdAt:Date.now(),
+          recurring:a.recurring
+        });
+      }
+    }
+    saveAsgns(updatedAsgns);
   };
   return (
     <div>
@@ -398,7 +505,7 @@ function TaskCard({ a, onComplete }) {
         <div style={{flex:1}}>
           <div style={{fontSize:15,fontWeight:600,color:"#fff"}}>{a.title}</div>
           {a.xVal && <div style={{fontSize:13,color:T.muted,marginTop:2}}>{a.xLabel}: {a.xVal}</div>}
-          <div style={{marginTop:4}}>{a.dueDate<toKey()?<span style={{...css.badge,background:"#2A0A0A",color:"#FF6B6B"}}>Overdue: {fmtDate(a.dueDate)}</span>:<span style={css.badge}>Due today</span>}</div>
+          <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}>{a.dueDate<toKey()?<span style={{...css.badge,background:"#2A0A0A",color:"#FF6B6B"}}>Overdue: {fmtDate(a.dueDate)}</span>:<span style={css.badge}>Due today</span>}{a.recurring&&<span style={{...css.badge,background:"#0A2010",color:"#2ECC71"}}>🔄 {a.recurring}</span>}</div>
         </div>
       </div>
       <div style={{borderTop:`1px solid ${T.bdr}`,paddingTop:12}}>
@@ -995,10 +1102,17 @@ function SalesView({ isAdmin, emps, events }) {
 function CashReconciliation({ sales, saveSales, emps, events, allDates }) {
   const [selDate, setSelDate] = useState(allDates[0] || toKey());
   const [editing, setEditing] = useState({});
+  const [cashVals, setCashVals] = useState({});
 
   const daySales = sales.filter(s => s.date === selDate);
   const ename  = id => emps.find(e=>e.id===id)?.name  || id;
   const ecolor = id => emps.find(e=>e.id===id)?.color || T.muted;
+  
+  // Show all emps — create empty entry if they don't have one
+  const allEmpRows = emps.map(emp => {
+    const existing = daySales.find(s=>s.assignedTo===emp.id||s.employeeId===emp.id);
+    return existing || { id:"new_"+emp.id, employeeId:emp.id, date:selDate, cashSales:"", cashInBag:"", isNew:true };
+  });
 
   const updateCash = (saleId, field, val) => {
     setEditing(p => ({...p, [saleId+field]: val}));
@@ -1410,7 +1524,6 @@ function EventForm({ init, onSave, onCancel }) {
 // ── INBOX ─────────────────────────────────────────────────────────────────────
 const REQ_CATS = [
   { id:"repair",    label:"Repair / Maintenance", icon:"🔧", color:"#E74C3C", hasPhoto:true  },
-  { id:"supply",    label:"Supply Request",        icon:"📦", color:"#F5A623", hasPhoto:false },
   { id:"wholesale", label:"Wholesale Inquiry",     icon:"🤝", color:"#2ECC71", hasPhoto:true  },
   { id:"customer",  label:"Customer Inquiry",      icon:"👤", color:"#3498DB", hasPhoto:false },
   { id:"issue",     label:"Issue / Problem",       icon:"⚠️", color:"#E67E22", hasPhoto:true  },
@@ -1553,11 +1666,27 @@ function RequestDetail({ req, user, emps, isAdmin, onBack, onUpdate, onMarkSeen 
         {/* Message */}
         {req.message&&<div style={{...css.nbox,marginBottom:10}}>{req.message}</div>}
 
+        {/* Wholesale inquiry fields */}
+        {req.cat==="wholesale"&&(req.customerName||req.companyName)&&(
+          <div style={{background:"#111D2E",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+            {req.customerName&&<div style={{fontSize:13,color:"#fff",marginBottom:4}}><b>Contact:</b> {req.customerName}</div>}
+            {req.companyName&&<div style={{fontSize:13,color:"#fff",marginBottom:4}}><b>Company:</b> {req.companyName}</div>}
+            {req.companyCity&&<div style={{fontSize:13,color:"#fff"}}><b>City:</b> {req.companyCity}</div>}
+          </div>
+        )}
         {/* Customer inquiry fields */}
         {req.cat==="customer"&&(req.customerName||req.customerPhone)&&(
           <div style={{background:"#111D2E",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
             {req.customerName&&<div style={{fontSize:13,color:"#fff",marginBottom:4}}><b>Name:</b> {req.customerName}</div>}
             {req.customerPhone&&<div style={{fontSize:13,color:"#fff"}}><b>Phone:</b> {req.customerPhone}</div>}
+          </div>
+        )}
+        {/* Wholesale inquiry fields */}
+        {req.cat==="wholesale"&&(req.companyName||req.customerName||req.companyCity)&&(
+          <div style={{background:"#111D2E",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+            {req.customerName&&<div style={{fontSize:13,color:"#fff",marginBottom:4}}><b>Contact:</b> {req.customerName}</div>}
+            {req.companyName&&<div style={{fontSize:13,color:"#fff",marginBottom:4}}><b>Company:</b> {req.companyName}</div>}
+            {req.companyCity&&<div style={{fontSize:13,color:"#fff"}}><b>City:</b> {req.companyCity}</div>}
           </div>
         )}
 
@@ -1634,6 +1763,10 @@ function RequestForm({ user, onSave, onCancel }) {
   const [message,      setMessage]      = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone,setCustomerPhone]= useState("");
+  const [companyName,  setCompanyName]  = useState("");
+  const [companyCity,  setCompanyCity]  = useState("");
+  const [companyName,  setCompanyName]  = useState("");
+  const [companyCity,  setCompanyCity]  = useState("");
   const [photo,        setPhoto]        = useState(null);
   const [photoType,    setPhotoType]    = useState(null);
   const [uploading,    setUploading]    = useState(false);
@@ -1652,7 +1785,7 @@ function RequestForm({ user, onSave, onCancel }) {
   const go = () => {
     if (!message.trim()&&cat!=="customer") return alert("Please enter a message.");
     if (cat==="customer"&&!customerName.trim()) return alert("Please enter the customer name.");
-    onSave({ cat, subject:subject.trim(), message:message.trim(), customerName:customerName.trim(), customerPhone:customerPhone.trim(), photo, photoType });
+    onSave({ cat, subject:subject.trim(), message:message.trim(), customerName:customerName.trim(), customerPhone:customerPhone.trim(), companyName:companyName.trim(), companyCity:companyCity.trim(), photo, photoType });
   };
 
   return (
@@ -1675,12 +1808,31 @@ function RequestForm({ user, onSave, onCancel }) {
         <label style={css.lbl}>Subject (optional)</label>
         <input style={css.inp} value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Brief summary..."/>
 
+        {/* Wholesale inquiry fields */}
+        {cat==="wholesale"&&<>
+          <label style={css.lbl}>Contact Name *</label>
+          <input style={css.inp} value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Contact person name"/>
+          <label style={css.lbl}>Company Name *</label>
+          <input style={css.inp} value={companyName||""} onChange={e=>setCompanyName(e.target.value)} placeholder="Business name"/>
+          <label style={css.lbl}>City</label>
+          <input style={css.inp} value={companyCity||""} onChange={e=>setCompanyCity(e.target.value)} placeholder="City, State"/>
+        </>
+        }
         {/* Customer inquiry fields */}
         {cat==="customer"&&<>
           <label style={css.lbl}>Customer Name *</label>
           <input style={css.inp} value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Full name"/>
           <label style={css.lbl}>Customer Phone</label>
           <input style={css.inp} type="tel" value={customerPhone} onChange={e=>setCustomerPhone(e.target.value)} placeholder="(303) 555-0000"/>
+        </>}
+        {/* Wholesale inquiry fields */}
+        {cat==="wholesale"&&<>
+          <label style={css.lbl}>Contact Name *</label>
+          <input style={css.inp} value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Contact person's name"/>
+          <label style={css.lbl}>Company Name *</label>
+          <input style={css.inp} value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="Business name"/>
+          <label style={css.lbl}>City</label>
+          <input style={css.inp} value={companyCity} onChange={e=>setCompanyCity(e.target.value)} placeholder="e.g. Denver, CO"/>
         </>}
 
         <label style={css.lbl}>Message{cat==="customer"?" / Notes":""}</label>
