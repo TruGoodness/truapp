@@ -20,7 +20,7 @@ module.exports = async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-2.1',
+        model: 'claude-instant-1.2',
         max_tokens: 100,
         messages: [{ role: 'user', content: 'Say hello' }],
       }),
