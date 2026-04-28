@@ -1790,7 +1790,7 @@ function ChatView({ sops, steps, tpls }) {
     if(!input.trim()||busy)return;
     const um={role:"user",content:input.trim()};const nm=[...msgs,um];setMsgs(nm);setInput("");setBusy(true);
     try{
-      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,system:ctx(),messages:nm.map(m=>({role:m.role,content:m.content}))})});
+      const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-haiku-4-5-20251001",max_tokens:1200,system:ctx(),messages:nm.map(m=>({role:m.role,content:m.content}))})});
       const text=await r.text();
       let d;
       try{d=JSON.parse(text);}catch(e){setMsgs(p=>[...p,{role:"assistant",content:"Parse error: "+text.slice(0,300)}]);setBusy(false);return;}
