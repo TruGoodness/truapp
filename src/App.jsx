@@ -1817,4 +1817,3 @@ function ChatView({ sops, steps, tpls }) {
     </div>
   );
 }
-
